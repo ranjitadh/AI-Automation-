@@ -1,96 +1,77 @@
 import json
-from openai import OpenAI
+import logging
+from openai import OpenAI, APIError, RateLimitError, APITimeoutError
 from django.conf import settings
+from apps.analysis.usage_tracker import check_daily_budget, log_usage
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+logger = logging.getLogger(__name__)
 
-def analyze_business_presence(business):
-    """
-    Analyzes a business's digital presence using GPT-4o.
-    Returns a score (0-100) and analysis notes.
-    """
-    prompt = f"""
-    Analyze the digital presence of this business and identify growth opportunities for a web/app development agency.
-    
-    Business Name: {business.name}
-    Category: {business.category}
-    Location: {business.location}
-    Has Website: {business.has_website}
-    Website URL: {business.website_url or 'None'}
-    Has Booking System: {business.has_booking_system}
-    Google Rating: {business.google_rating or 'N/A'}
-    
-    Output JSON exactly in this format:
-    {{
-        "score": <integer 0-100 based on digital maturity>,
-        "strengths": ["...", "..."],
-        "weaknesses": ["...", "..."],
-        "opportunities": ["...", "..."]
-    }}
-    """
-    
+client = OpenAI(
+    api_key=settings.OPENAI_API_KEY,
+    max_retries=3,
+    timeout=30.0,
+) if settings.OPENAI_API_KEY else None
+
+def _count_tokens(text):
     try:
-        response = client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": "You are a digital presence analyst for a web development agency."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={ "type": "json_object" }
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        print(f"OpenAI Analysis Error: {e}")
-        return {"score": 50, "strengths": [], "weaknesses": ["Could not analyze properly"], "opportunities": ["Needs digital review"]}
+        import tiktoken
+        enc = tiktoken.encoding_for_model(settings.OPENAI_MODEL)
+        return len(enc.encode(text))
+    except Exception:
+        return len(text.split())
 
-
-def generate_outreach_email(business):
-    """
-    Generates a personalized cold email using GPT-4o.
-    """
-    prompt = f"""
-    You are an advanced autonomous AI Sales Development Representative (AI SDR) designed to help a web development and mobile app agency acquire new clients. Your primary responsibility is to research local businesses, analyze their digital presence, and generate highly personalized cold outreach messages offering website development, mobile app development, booking systems, and digital growth solutions.
-
-    Business Profile:
-    - Name: {business.name}
-    - Type: {business.category}
-    - Location: {business.location}
-    - Has Website: {business.has_website}
-    - Has Booking System: {business.has_booking_system}
-    - Digital Score: {business.digital_score}/100
-    - Analysis Notes: {json.dumps(business.analysis_notes)}
-    
-    Agency Info (Use softly if needed):
-    - Name: {settings.AGENCY_NAME}
-    - Website: {settings.AGENCY_WEBSITE}
-
-    RULES:
-    1. Email must be extremely short and focused (between 80–120 words). Real humans do not write long essays.
-    2. Subject must be short, casual, and highly personal (max 6-8 words, e.g., "quick question regarding {business.name}" or "noticed your site in {business.location}"). BANNED: Banal marketing subjects or all-capitalized subject lines.
-    3. GREETINGS & OPENINGS: Absolutely BANNED from starting with "Dear [Name]," "I hope this email finds you well," "I hope you are doing great," or "My name is...". Instead, start directly, warmly, and casually, like: "Hi [Name]," or "Hey [Name],". The very next sentence must immediately jump to a specific observation about their business website or location so it reads like a real human junior outreach note.
-    4. BANNED AI BUZZWORDS: Under no circumstances are you allowed to use any of these typical ChatGPT/AI copywriting words: "delighted", "moreover", "testament", "revolutionize", "leverage", "robust", "optimize", "streamline", "cutting-edge", "pioneering", "thrilled", "excited", "scale", "landscape", "furthermore", "in today's digital age", "look no further", "top-notch", "game-changer", "bespoke", "tailor-made", "synergistic", "transform".
-    5. Tone must be warm, direct, conversational, and highly personal. Write exactly like a busy junior partner writing a quick note. Keep sentences simple and punchy.
-    6. Always include business name naturally.
-    7. Always include a soft, non-salesy call-to-action (e.g. "Open to a quick chat next week?", "No pressure at all, just let me know if you're open to a brief call.").
-    8. Never mention AI, SDRs, automation, or algorithms. Focus strictly on a single growth value point identified in the digital scorecard.
-
-    Output ONLY valid JSON:
-    {{
-        "subject": "string",
-        "email": "string"
-    }}
-    """
-    
+def _call_gpt(system, prompt):
+    if not client:
+        logger.warning("OpenAI API key not configured")
+        return {}
+    if not check_daily_budget():
+        logger.error("Daily OpenAI budget exceeded")
+        return {}
     try:
-        response = client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": "You are an expert cold email copywriter."},
+        r = client.chat.completions.create(
+            model=settings.OPENAI_MODEL, messages=[
+                {"role": "system", "content": system},
                 {"role": "user", "content": prompt}
-            ],
-            response_format={ "type": "json_object" }
+            ], response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
+        content = r.choices[0].message.content
+        log_usage(
+            model=settings.OPENAI_MODEL,
+            input_tokens=_count_tokens(system + prompt),
+            output_tokens=_count_tokens(content or ""),
+            endpoint="chat.completions",
+        )
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse OpenAI response as JSON: {content[:200]}")
+            return {}
+    except RateLimitError as e:
+        logger.error(f"OpenAI rate limit exceeded: {e}")
+        return {}
+    except APITimeoutError as e:
+        logger.error(f"OpenAI request timed out: {e}")
+        return {}
+    except APIError as e:
+        logger.error(f"OpenAI API error: {e}")
+        return {}
     except Exception as e:
-        print(f"OpenAI Email Gen Error: {e}")
-        return {"subject": f"Quick question regarding {business.name}", "email": "Hi, I noticed your business and would love to help you grow your digital presence. Let me know if you're open to a chat."}
+        logger.error(f"Unexpected OpenAI error: {e}", exc_info=True)
+        return {}
+
+def analyze_job_fit(job):
+    return _call_gpt(
+        "You are a job fit analyst.",
+        f"Job: {job.title} @ {job.company}\nLocation: {job.location or 'N/A'}\nDescription: {job.job_description_text or 'N/A'}\n\nOutput JSON: {{\"score\": 0-100, \"strengths\": [], \"gaps\": [], \"key_requirements\": []}}"
+    ) or {"score": 50, "strengths": [], "gaps": [], "key_requirements": []}
+
+def generate_cover_letter(job, resume_text="", skills=None):
+    skills_text = ", ".join(skills) if skills else "N/A"
+    data = _call_gpt(
+        "You write concise, tailored cover letters.",
+        f"""Job: {job.title} @ {job.company}\nDescription: {job.job_description_text or 'N/A'}\nResume: {resume_text or 'N/A'}\nSkills: {skills_text}\n\nRules: 150-250 words, professional, tailored, first-person, no placeholders, no AI mention.\n\nOutput JSON: {{"subject": "Application for {job.title}", "cover_letter": "..."}}"""
+    ) or {}
+    return {
+        "subject": data.get("subject", f"Application for {job.title} at {job.company}"),
+        "cover_letter": data.get("cover_letter", f"Application for {job.title} at {job.company}")
+    }

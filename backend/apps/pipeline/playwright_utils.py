@@ -1,206 +1,112 @@
-import os
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 from django.conf import settings
 from playwright.sync_api import sync_playwright
 
-def run_auto_apply_model(website_url, subject, body, agency_info=None):
-    """
-    Automates browsing a website to find a contact form, fills it, 
-    submits it, and returns the screenshot path and execution logs.
-    """
-    logs = []
-    screenshot_filename = None
-    
-    if not agency_info:
-        agency_info = {
-            'name': getattr(settings, 'AGENCY_NAME', 'Your Agency'),
-            'email': getattr(settings, 'AGENCY_EMAIL', 'hello@youragency.com'),
-            'phone': getattr(settings, 'AGENCY_PHONE', '+1-234-567-8900'),
-        }
+MEDIA = Path(settings.MEDIA_ROOT) / 'application_screenshots'
 
-    logs.append(f"[System] Initializing Auto-Apply Model for: {website_url}")
-    
-    # Ensure media directory exists
-    media_dir = Path(settings.MEDIA_ROOT) / 'outreach_screenshots'
-    media_dir.mkdir(parents=True, exist_ok=True)
+def ss(page, name):
+    MEDIA.mkdir(parents=True, exist_ok=True)
+    p = MEDIA / name
+    page.screenshot(path=str(p))
+    return f"application_screenshots/{name}"
+
+def fill_field(field, value):
+    if field.is_visible() and field.get_attribute("type") not in ("submit", "button", "hidden", "checkbox", "radio"):
+        field.fill(value)
+
+def _fill_common(page, info, cover):
+    for f in page.locator("input:visible, textarea:visible").all():
+        c = ((f.get_attribute("name") or "") + " " + (f.get_attribute("id") or "") + " " + (f.get_attribute("placeholder") or "")).lower()
+        if f.input_value(): continue
+        if "email" in c or f.get_attribute("type") == "email": fill_field(f, info['email'])
+        elif "phone" in c or "tel" in c: fill_field(f, info['phone'])
+        elif "name" in c: fill_field(f, info['name'])
+        elif f.evaluate("el => el.tagName") == "TEXTAREA" or "message" in c or "cover" in c: fill_field(f, cover)
+
+def run_auto_apply_model(job, cover_letter, applicant_info=None):
+    logs, url = [], job.application_page_url or job.job_description_url or ""
+    if not url: return False, logs + ["[Error] No URL"], None
+    info = applicant_info or {'name': 'Your Name', 'email': 'your@email.com', 'phone': '+1-234-567-8900'}
 
     try:
         with sync_playwright() as p:
-            logs.append("[1/4] Launching headless browser...")
             browser = p.chromium.launch(headless=True)
-            
-            # Use specific viewport and user agent to avoid bot detection
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800}
-            )
-            page = context.new_page()
-            
-            logs.append(f"[2/4] Navigating to {website_url}...")
-            try:
-                page.goto(website_url, timeout=30000, wait_until="domcontentloaded")
-            except Exception as e:
-                logs.append(f"[Error] Failed to load home page: {str(e)}. Attempting to prepend http/https if missing.")
-                if not website_url.startswith(('http://', 'https://')):
-                    website_url = 'https://' + website_url
-                    page.goto(website_url, timeout=30000, wait_until="domcontentloaded")
-                else:
-                    raise e
-            
-            logs.append("[3/4] Searching for contact page or forms...")
-            
-            # Check if there's a form on the landing page first
-            form = page.locator("form").first
-            contact_page_url = website_url
-            
-            if form.count() == 0:
-                logs.append("No form found on homepage. Scanning for contact or booking links...")
-                
-                # Look for common contact links
-                contact_keywords = ["contact", "contact-us", "contactus", "about", "book", "write", "support", "get-in-touch", "inquiry"]
-                links = page.locator("a")
-                contact_link = None
-                
-                for i in range(links.count()):
-                    link = links.nth(i)
-                    href = link.get_attribute("href") or ""
-                    text = (link.text_content() or "").lower().strip()
-                    
-                    if any(keyword in href.lower() or keyword in text for keyword in contact_keywords):
-                        contact_link = href
-                        logs.append(f"Discovered contact link candidate: {text} -> {href}")
-                        break
-                
-                if contact_link:
-                    # Resolve relative URL
-                    if not contact_link.startswith(('http://', 'https://')):
-                        if contact_link.startswith('/'):
-                            from urllib.parse import urlparse
-                            parsed_url = urlparse(website_url)
-                            contact_page_url = f"{parsed_url.scheme}://{parsed_url.netloc}{contact_link}"
-                        else:
-                            contact_page_url = f"{website_url.rstrip('/')}/{contact_link}"
-                            
-                    logs.append(f"Navigating to contact page: {contact_page_url}...")
-                    page.goto(contact_page_url, timeout=20000, wait_until="domcontentloaded")
-                else:
-                    logs.append("No obvious contact link discovered. Remaining on home page.")
+            ctx = browser.new_context(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", viewport={"width": 1280, "height": 800})
+            page = ctx.new_page()
+            page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            logs.append(f"[OK] Loaded {url}")
 
-            # Try locating form again
-            forms = page.locator("form")
-            logs.append(f"Found {forms.count()} form(s) on page.")
-            
-            if forms.count() == 0:
-                # If still no form, let's create a visual log & screenshot for failure
-                logs.append("[Failed] No form elements discovered on this website.")
-                screenshot_name = f"fail_{uuid.uuid4().hex}.png"
-                screenshot_path = media_dir / screenshot_name
-                page.screenshot(path=str(screenshot_path))
-                screenshot_filename = f"outreach_screenshots/{screenshot_name}"
-                browser.close()
-                return False, logs, screenshot_filename
-            
-            # Select the largest or first form
-            target_form = forms.first
-            logs.append("Selecting target form for automated submission...")
-            
-            # Find input elements
-            inputs = target_form.locator("input, textarea, select")
-            logs.append(f"Analyzing {inputs.count()} form field(s)...")
-            
-            filled_fields = []
-            
-            for i in range(inputs.count()):
-                field = inputs.nth(i)
-                name_attr = (field.get_attribute("name") or "").lower()
-                id_attr = (field.get_attribute("id") or "").lower()
-                type_attr = (field.get_attribute("type") or "").lower()
-                placeholder_attr = (field.get_attribute("placeholder") or "").lower()
-                aria_attr = (field.get_attribute("aria-label") or "").lower()
-                
-                # Check for visibility and accessibility
-                if not field.is_visible():
-                    continue
-                if type_attr in ["submit", "button", "hidden", "checkbox", "radio"]:
-                    continue
-                
-                # Combine search tokens to match fields
-                combined_tokens = f"{name_attr} {id_attr} {placeholder_attr} {aria_attr}"
-                
-                # 1. Email field
-                if "email" in type_attr or "email" in name_attr or "email" in combined_tokens or "mail" in name_attr:
-                    field.fill(agency_info['email'])
-                    filled_fields.append(f"Email -> {agency_info['email']}")
-                
-                # 2. Name field
-                elif "name" in combined_tokens or "fullname" in combined_tokens or "first" in combined_tokens or "last" in combined_tokens:
-                    field.fill(agency_info['name'])
-                    filled_fields.append(f"Name -> {agency_info['name']}")
-                
-                # 3. Phone field
-                elif "phone" in combined_tokens or "tel" in combined_tokens or "mobile" in combined_tokens or "phone" in type_attr:
-                    field.fill(agency_info['phone'])
-                    filled_fields.append(f"Phone -> {agency_info['phone']}")
-                
-                # 4. Subject field
-                elif "subject" in combined_tokens or "title" in combined_tokens or "reason" in combined_tokens:
-                    field.fill(subject)
-                    filled_fields.append(f"Subject -> {subject}")
-                
-                # 5. Message field
-                elif "message" in combined_tokens or "body" in combined_tokens or "comment" in combined_tokens or "text" in combined_tokens or field.evaluate("el => el.tagName") == "TEXTAREA":
-                    field.fill(body)
-                    filled_fields.append("Message Body -> [Generated Email]")
-                    
-                # 6. Fallback - if name is empty and field looks like text
-                elif type_attr == "text" and not any(f.startswith("Name") for f in filled_fields):
-                    field.fill(agency_info['name'])
-                    filled_fields.append(f"Name (fallback) -> {agency_info['name']}")
-
-            logs.append(f"Filled fields: {', '.join(filled_fields)}")
-            
-            # Look for submit button
-            submit_btn = target_form.locator("button[type='submit'], input[type='submit']").first
-            
-            if submit_btn.count() == 0:
-                # Search for any button containing "send" or "submit" inside the form
-                buttons = target_form.locator("button, input")
-                for j in range(buttons.count()):
-                    btn = buttons.nth(j)
-                    btn_text = (btn.text_content() or btn.get_attribute("value") or "").lower()
-                    if "send" in btn_text or "submit" in btn_text or "apply" in btn_text or "book" in btn_text:
-                        submit_btn = btn
-                        break
-            
-            if submit_btn.count() == 0:
-                # Last resort: just use the first button inside the form
-                submit_btn = target_form.locator("button").first
-                
-            logs.append("[4/4] Submitting form...")
-            
-            # Click and wait for network idle or navigation
-            submit_btn.click()
-            page.wait_for_timeout(3000)  # Wait short duration for submission handler to kick off
-            
-            # Capture the screenshot of the confirmation page
-            screenshot_name = f"success_{uuid.uuid4().hex}.png"
-            screenshot_path = media_dir / screenshot_name
-            page.screenshot(path=str(screenshot_path))
-            screenshot_filename = f"outreach_screenshots/{screenshot_name}"
-            
-            logs.append("[Success] Auto-Apply Model successfully submitted form and captured screenshot.")
-            browser.close()
-            return True, logs, screenshot_filename
-            
+            url_l = page.url.lower()
+            if "linkedin.com" in url_l and ("easyapply" in url_l or "jobs" in url_l):
+                return _linkedin(page, logs, info, cover_letter)
+            if "indeed.com" in url_l:
+                return _indeed(page, logs, info, cover_letter)
+            return _generic(page, logs, info, cover_letter)
     except Exception as e:
-        logs.append(f"[Error] Exception occurred in Playwright automation: {str(e)}")
-        # Take an error screenshot if page context exists
-        try:
-            screenshot_name = f"error_{uuid.uuid4().hex}.png"
-            screenshot_path = media_dir / screenshot_name
-            page.screenshot(path=str(screenshot_path))
-            screenshot_filename = f"outreach_screenshots/{screenshot_name}"
-        except:
-            pass
-        return False, logs, screenshot_filename
+        logs.append(f"[Error] {e}")
+        return False, logs, None
+
+def _linkedin(page, logs, info, cover):
+    logs.append("[LinkedIn] Easy Apply flow")
+    btn = page.locator("button:has-text('Easy Apply'), button[aria-label*='Easy Apply']").first
+    if btn.count(): btn.click(); page.wait_for_timeout(2000)
+    else: return _generic(page, logs, info, cover)
+
+    for _ in range(10):
+        page.wait_for_timeout(1000)
+        for ta in page.locator("textarea").all():
+            if ta.is_visible() and len(ta.input_value()) < 10: ta.fill(cover); break
+        _fill_common(page, info, cover)
+        nxt = page.locator("button:has-text('Next'), button:has-text('Review'), button:has-text('Submit')").first
+        if nxt.count() and nxt.is_visible(): nxt.click()
+        else: break
+        page.wait_for_timeout(1500)
+
+    logs.append("[LinkedIn] Done")
+    browser = page.context.browser; browser.close()
+    return True, logs, None
+
+def _indeed(page, logs, info, cover):
+    logs.append("[Indeed] Apply flow")
+    btn = page.locator("button:has-text('Apply now'), a:has-text('Apply Now')").first
+    if btn.count(): btn.click(); page.wait_for_timeout(3000)
+    else: return _generic(page, logs, info, cover)
+    page.wait_for_timeout(2000); _fill_common(page, info, cover)
+    for _ in range(5):
+        nxt = page.locator("button:has-text('Continue'), button:has-text('Submit')").first
+        if nxt.count() and nxt.is_visible(): nxt.click(); page.wait_for_timeout(2000)
+        else: break
+    logs.append("[Indeed] Done")
+    browser = page.context.browser; browser.close()
+    return True, logs, None
+
+def _generic(page, logs, info, cover):
+    logs.append("[Generic] Form fill")
+    for kw in ["apply", "career", "careers", "job", "jobs", "application"]:
+        for link in page.locator("a").all():
+            href = link.get_attribute("href") or ""
+            if kw in href.lower() or kw in (link.text_content() or "").lower():
+                if not href.startswith("http"):
+                    p = urlparse(page.url)
+                    href = f"{p.scheme}://{p.netloc}{href}" if href.startswith("/") else f"{page.url.rstrip('/')}/{href}"
+                page.goto(href, timeout=20000, wait_until="domcontentloaded")
+                break
+        else: continue
+        break
+
+    if page.locator("form").count() == 0:
+        logs.append("[Failed] No form found")
+        browser = page.context.browser; browser.close()
+        return False, logs, None
+
+    _fill_common(page, info, cover)
+    sub = page.locator("button[type='submit'], input[type='submit']").first
+    if sub.count() == 0:
+        for b in page.locator("button").all():
+            if "submit" in (b.text_content() or "").lower() or "apply" in (b.text_content() or "").lower(): sub = b; break
+    if sub.count(): sub.click(); page.wait_for_timeout(3000)
+    logs.append("[Generic] Submitted")
+    browser = page.context.browser; browser.close()
+    return True, logs, None
