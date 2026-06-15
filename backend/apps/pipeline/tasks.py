@@ -13,6 +13,7 @@ from apps.resumes.models import Resume, ResumeVersion
 from apps.pipeline.models import PipelineRun
 
 logger = logging.getLogger(__name__)
+MAX_LOG_CHARS = 3000
 
 
 def _log(run, msg, fail=False):
@@ -167,10 +168,59 @@ def task_analyze_fit_and_decide(run_id, campaign_id=None):
         job=job,
     )
 
-    _log(run, f"Fit score: {fit_score}/100 — Decision: {decision.decision if decision else 'unknown'}")
+    run.decision = decision.decision if decision else 'unknown'
+    run.fit_score = fit_score
+    reasoning = job_match.get('reasoning', '')
+
+    if 'Salary:' in reasoning:
+        _log(run, "Salary throttle active")
+    if 'Competition:' in reasoning:
+        _log(run, "Competitive analysis active")
+
+    try:
+        from apps.ai.salary_throttle_engine import compute_throttle
+        from apps.ai.competitive_analysis_engine import score_competitiveness
+
+        goals_data = candidate_data.get('goals', {})
+        throttle_info = compute_throttle(
+            target_salary_min=goals_data.get('target_salary_min'),
+            target_salary_max=goals_data.get('target_salary_max'),
+            job_salary_min=job.salary_min,
+            job_salary_max=job.salary_max,
+            job_salary_period=job.salary_period,
+        )
+        run.throttle_factor = throttle_info.get('throttle_factor')
+        run.bid_score = throttle_info.get('bid_score')
+
+        comp_info = score_competitiveness(
+            posted_at=job.posted_at,
+            applicant_count=job.application_count,
+            company_size=job.company.size if job.company else None,
+            location=job.location,
+            remote=job.remote,
+        )
+        run.competitiveness_score = comp_info.get('competitiveness_score')
+    except Exception:
+        pass
+
+    run.save(update_fields=[
+        'decision', 'fit_score', 'throttle_factor',
+        'bid_score', 'competitiveness_score', 'log',
+    ])
+
+    _log(run, f"Fit score: {fit_score}/100 — Decision: {run.decision}")
+    throttle_log = []
+    if run.throttle_factor is not None:
+        throttle_log.append(f"throttle={run.throttle_factor}")
+    if run.bid_score is not None:
+        throttle_log.append(f"bid={run.bid_score}")
+    if run.competitiveness_score is not None:
+        throttle_log.append(f"competition={run.competitiveness_score}")
+    if throttle_log:
+        _log(run, f"Pipeline signals: {', '.join(throttle_log)}")
     _log(run, f"Skills: {job_match.get('skill_match_score', 0)}% | Experience: {job_match.get('experience_match_score', 0)}% | Seniority: {job_match.get('seniority_match_score', 0)}% | Industry: {job_match.get('industry_match_score', 0)}%")
 
-    strengths = job_match.get('reasoning', '')[:300]
+    strengths = reasoning[:300]
     if strengths:
         _log(run, f"Assessment: {strengths}")
 
@@ -306,6 +356,86 @@ def task_generate_cover_letter(task_input):
 
 @shared_task(
     autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 2},
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    soft_time_limit=120,
+    time_limit=300,
+    acks_late=True,
+)
+def task_evaluate_quality(task_input):
+    if task_input is None:
+        return None
+    run_id, fit_score, job, org, version, cover_text, auto_apply = task_input
+
+    try:
+        run = PipelineRun.objects.get(id=run_id)
+    except ObjectDoesNotExist:
+        logger.error(f"PipelineRun {run_id} not found")
+        return None
+    run.stage = 'quality_check'
+    run.save(update_fields=['stage'])
+
+    from apps.ai.recruiter_simulation_engine import simulate_recruiter_perspectives
+    from apps.ai.application_quality_engine import evaluate_application_quality
+
+    resume = Resume.objects.filter(organization=org, is_active=True).first()
+    resume_data = {}
+    if resume:
+        resume_data = {
+            'summary': resume.summary or '',
+            'skills': resume.skills or [],
+            'experience': resume.experience or [],
+            'years_of_experience': float(resume.years_of_experience) if resume.years_of_experience else 0,
+            'seniority_level': resume.seniority_level or '',
+        }
+    profile_data = {}
+
+    job_for_quality = {
+        'title': job.title,
+        'company': job.company.name if job.company else '',
+        'description': job.description or '',
+        'required_skills': job.requirements or [],
+        'seniority_level': job.seniority or '',
+        'location': job.location or '',
+        'salary_min': job.salary_min,
+        'salary_max': job.salary_max,
+    }
+
+    quality = evaluate_application_quality(
+        resume_data=resume_data,
+        cover_letter_text=cover_text or '',
+        screening_answers=[],
+        profile_data=profile_data,
+        job_data=job_for_quality,
+    )
+    quality_score = quality.get('application_quality_score', 50)
+    run.quality_score = quality_score
+    run.save(update_fields=['quality_score'])
+
+    sim = simulate_recruiter_perspectives(
+        resume_data=resume_data,
+        cover_letter_text=cover_text or '',
+        screening_answers=[],
+        profile_data=profile_data,
+        job_data=job_for_quality,
+    )
+    interview_prob = sim.get('interview_probability', 0)
+    should_submit = quality.get('should_submit', True)
+
+    _log(run, f"Quality: {quality_score}/100 | Interview prob: {interview_prob:.0%} | Submit: {should_submit}")
+
+    if not should_submit and quality_score < 40:
+        _log(run, f"Low quality score ({quality_score}) — proceeding with caution")
+    elif interview_prob < 0.1 and quality_score < 50:
+        _log(run, f"Low interview probability ({interview_prob:.0%}) — lowering expectations")
+
+    return (run_id, fit_score, job, org, version, cover_text, auto_apply)
+
+
+@shared_task(
+    autoretry_for=(Exception,),
     retry_kwargs={'max_retries': 3},
     retry_backoff=True,
     retry_backoff_max=600,
@@ -334,6 +464,11 @@ def task_create_application(task_input, campaign_id=None):
         status='approved' if auto_apply else 'queued',
         dispatch_status='pending',
     )
+
+    run.application_id = str(app.id)
+    if version:
+        run.resume_version_id = str(version.id)
+    run.save(update_fields=['application_id', 'resume_version_id'])
 
     _log(run, f"Application {app.id} created ({'auto-apply' if auto_apply else 'queued for review'})")
 
@@ -542,6 +677,7 @@ def start_pipeline_for_job(job_id, campaign_id=None, org_id=None):
         task_analyze_fit_and_decide.s(campaign_id=campaign_id),
         task_adapt_resume.s(),
         task_generate_cover_letter.s(),
+        task_evaluate_quality.s(),
         task_create_application.s(campaign_id=campaign_id),
     ]
     if auto:

@@ -49,6 +49,20 @@ def verify_application_consistency(
         if job_checks.get('blockers'):
             blockers.extend(job_checks['blockers'])
 
+    tech_checks = _check_technology_alignment(resume_data, job_data)
+    if tech_checks.get('warnings'):
+        warnings.extend(tech_checks['warnings'])
+    if tech_checks.get('contradictions'):
+        contradictions.extend(tech_checks['contradictions'])
+
+    loc_checks = _check_location_consistency(profile_data, job_data, screening_answers)
+    if loc_checks.get('contradictions'):
+        contradictions.extend(loc_checks['contradictions'])
+
+    edu_checks = _check_education_consistency(resume_data, screening_answers, job_data)
+    if edu_checks.get('contradictions'):
+        contradictions.extend(edu_checks['contradictions'])
+
     is_consistent = len(contradictions) == 0
     can_submit = len(blockers) == 0
 
@@ -64,6 +78,9 @@ def verify_application_consistency(
             "answers_consistent": answer_checks.get('consistent', True),
             "profile_complete": profile_checks.get('complete', True),
             "job_aligned": job_checks.get('aligned', True) if job_data else True,
+            "technology_aligned": tech_checks.get('aligned', True),
+            "location_consistent": loc_checks.get('consistent', True),
+            "education_consistent": edu_checks.get('consistent', True),
         },
     }
 
@@ -196,22 +213,22 @@ def _check_screening_answer_consistency(
                     f"Work authorization answer doesn't match profile: '{ans.get('question', '')[:50]}'"
                 )
 
-        if 'skill' in q or 'technology' in q or any(s in q for s in ['python', 'java', 'javascript', 'react', 'aws', 'sql']):
+        if 'education' in q or 'degree' in q or 'qualification' in q:
+            if education:
+                degrees = [str(e.get('degree', '')).lower() for e in education if e.get('degree')]
+                if degrees and not any(d in a for d in degrees):
+                    result['contradictions'].append(
+                        f"Education answer '{ans.get('answer', '')[:50]}' doesn't match "
+                        f"resume degrees: {', '.join(d[:20] for d in degrees)}"
+                    )
+
+        if 'skill' in q or 'technology' in q:
             mentioned_skills = [s for s in skills if s in a]
             if not mentioned_skills and skills:
-                pass
-
-        if 'education' in q or 'degree' in q:
-            if education:
-                degrees = [str(e.get('degree', '')).lower() for e in education]
-                if not any(d in a for d in degrees if d):
-                    pass
-
-        if 'location' in q or 'relocate' in q or 'remote' in q:
-            preferred = goals.get('remote_preference', 'any').lower()
-            if preferred != 'any':
-                if preferred == 'remote' and 'remote' not in a and 'yes' in a:
-                    pass
+                result['warnings'] = result.get('warnings', [])
+                result['warnings'].append(
+                    f"No skills from resume mentioned in answer about skills"
+                )
 
     return result
 
@@ -281,6 +298,198 @@ def _check_job_consistency(profile_data: dict, job_data: dict) -> dict:
             result['warnings'].append(
                 f"Candidate missing {len(missing)}/{len(job_skills)} required skills"
             )
+
+    return result
+
+
+SKILL_SYNONYMS = {
+    "ci/cd": ["continuous integration", "continuous deployment", "ci", "cd"],
+    "cicd": ["continuous integration", "continuous deployment", "ci", "cd"],
+    "k8s": ["kubernetes", "k8", "kube"],
+    "kubernetes": ["k8s", "k8", "kube"],
+    "js": ["javascript", "ecmascript"],
+    "javascript": ["js", "ecmascript"],
+    "ts": ["typescript"],
+    "typescript": ["ts"],
+    "node.js": ["nodejs", "node", "node js"],
+    "nodejs": ["node.js", "node", "node js"],
+    "next.js": ["nextjs", "next", "next js"],
+    "nextjs": ["next.js", "next", "next js"],
+    "react.js": ["reactjs", "react", "react js"],
+    "reactjs": ["react.js", "react", "react js"],
+    "vue.js": ["vuejs", "vue", "vue js"],
+    "vuejs": ["vue.js", "vue", "vue js"],
+    "express.js": ["expressjs", "express", "express js"],
+    "expressjs": ["express.js", "express", "express js"],
+    "rest api": ["rest", "restful", "rest api", "restful api"],
+    "rest apis": ["rest", "restful", "rest api", "restful api"],
+    "restful api": ["rest", "rest api", "rest apis"],
+    "graphql": ["gql", "graph ql"],
+    "aws": ["amazon web services", "amazon"],
+    "gcp": ["google cloud platform", "google cloud"],
+    "azure": ["microsoft azure", "ms azure"],
+    "aws lambda": ["lambda", "serverless function", "amazon lambda"],
+    "s3": ["amazon s3", "simple storage service"],
+    "sqs": ["amazon sqs", "simple queue service"],
+    "docker": ["container", "containerization", "docker engine"],
+    "terraform": ["iac", "infrastructure as code", "terraform cloud"],
+    "postgresql": ["postgres", "postgres sql"],
+    "postgres": ["postgresql", "postgres sql"],
+    "pandas": ["python pandas", "dataframe", "data frames"],
+    "python": ["python3", "python 3"],
+    "react": ["react.js", "reactjs", "react js"],
+    "vue": ["vue.js", "vuejs", "vue js"],
+    "angular": ["angular.js", "angularjs", "angular 2+"],
+    "redis": ["redis cache", "redis db"],
+    "mongodb": ["mongo", "mongo db"],
+    "mysql": ["my sql", "sql"],
+    "django": ["django framework", "django python"],
+    "fastapi": ["fast api", "fast-api"],
+    "flask": ["flask python", "python flask"],
+}
+
+
+def _normalize_skills(skills: set) -> set:
+    normalized = set()
+    for skill in skills:
+        skill_clean = skill.strip().lower()
+        if skill_clean in SKILL_SYNONYMS:
+            normalized.update(SKILL_SYNONYMS[skill_clean])
+        normalized.add(skill_clean)
+        parts = re.split(r'[/\-.+#]', skill_clean)
+        for p in parts:
+            p = p.strip()
+            if len(p) > 1:
+                normalized.add(p.lower())
+    return normalized
+
+
+def _check_technology_alignment(resume_data: dict, job_data: dict) -> dict:
+    result = {'aligned': True, 'warnings': [], 'contradictions': []}
+    if not resume_data or not job_data:
+        return result
+
+    job_technologies = set(
+        t.lower() for t in (
+            job_data.get('required_skills', []) +
+            job_data.get('technologies', []) +
+            job_data.get('tools', [])
+        )
+    )
+    if not job_technologies:
+        return result
+
+    resume_text_parts = []
+    for exp in resume_data.get('experience', []):
+        resume_text_parts.append(exp.get('title', ''))
+        resume_text_parts.extend(exp.get('bullets', []))
+
+    resume_skills = set(s.lower() for s in resume_data.get('skills', []))
+    resume_text = ' '.join(resume_text_parts).lower()
+
+    all_resume_tech = resume_skills | set(re.findall(r'\b[a-z0-9+#.\-]+(?:\s+[a-z0-9+#.\-]+)*\b', resume_text))
+    all_resume_tech = _normalize_skills(all_resume_tech)
+    job_technologies = _normalize_skills(job_technologies)
+
+    missing_critical = []
+    for tech in job_technologies:
+        if tech not in all_resume_tech:
+            missing_critical.append(tech)
+
+    if len(missing_critical) > len(job_technologies) * 0.4:
+        result['aligned'] = False
+        result['contradictions'].append(
+            f"Candidate missing {len(missing_critical)}/{len(job_technologies)} "
+            f"required technologies: {', '.join(sorted(missing_critical)[:6])}"
+        )
+    elif missing_critical:
+        result['warnings'].append(
+            f"Candidate missing technologies: {', '.join(sorted(missing_critical)[:4])}"
+        )
+
+    return result
+
+
+def _check_location_consistency(profile_data: dict, job_data: dict, screening_answers: list) -> dict:
+    result = {'consistent': True, 'contradictions': []}
+    goals = profile_data.get('goals', {})
+
+    if not job_data:
+        return result
+
+    job_location = (job_data.get('location') or '').lower()
+    remote_pref = goals.get('remote_preference', 'any').lower()
+
+    for ans in screening_answers or []:
+        q = ans.get('question', '').lower()
+        a = ans.get('answer', '').lower()
+
+        if ('relocate' in q or 'relocation' in q) and 'remote' not in job_location:
+            willing_to_relocate = 'yes' in a or 'willing' in a
+            if not willing_to_relocate:
+                goal_relocation = goals.get('open_to_relocation', False)
+                if not goal_relocation:
+                    result['contradictions'].append(
+                        f"Answer says not willing to relocate but job is in {job_location}"
+                    )
+
+        if ('remote' in q or 'onsite' in q or 'in-office' in q):
+            prefers_remote = 'remote' in a.lower()
+            job_is_remote = 'remote' in job_location
+            if prefers_remote and not job_is_remote and remote_pref == 'remote':
+                result['contradictions'].append(
+                    "Answer prefers remote but job requires onsite/hybrid and profile prefers remote"
+                )
+
+    return result
+
+
+def _check_education_consistency(resume_data: dict, screening_answers: list, job_data: dict) -> dict:
+    result = {'consistent': True, 'contradictions': []}
+    education = resume_data.get('education', [])
+    job_requirements = job_data.get('requirements', []) if job_data else []
+
+    if not education or not screening_answers:
+        return result
+
+    resume_degrees = [str(e.get('degree', '')).lower() for e in education if e.get('degree')]
+    resume_fields = [str(e.get('field', '')).lower() for e in education if e.get('field')]
+
+    degree_levels = {
+        'bachelor': 1, 'b.s.': 1, 'ba': 1, 'b.a.': 1, 'bs': 1,
+        'master': 2, 'm.s.': 2, 'ma': 2, 'm.a.': 2, 'ms': 2, 'mba': 2,
+        'phd': 3, 'ph.d': 3, 'doctorate': 3, 'doctor': 3,
+    }
+    max_resume_level = 0
+    for deg in resume_degrees:
+        for key, level in degree_levels.items():
+            if key in deg:
+                max_resume_level = max(max_resume_level, level)
+
+    for req in job_requirements:
+        req_lower = req.lower()
+        req_level = 0
+        for key, level in degree_levels.items():
+            if key in req_lower:
+                req_level = max(req_level, level)
+        if req_level > max_resume_level and max_resume_level > 0:
+            result['contradictions'].append(
+                f"Job requires higher degree level ({req}) than candidate has "
+                f"({', '.join(d[:30] for d in resume_degrees)})"
+            )
+        elif req_level > 0 and max_resume_level == 0:
+            result['contradictions'].append(
+                f"Job requires {req} but candidate has no degree listed in resume"
+            )
+
+    for ans in screening_answers:
+        q = ans.get('question', '').lower()
+        a = ans.get('answer', '').lower()
+        if ('degree' in q or 'education' in q or 'qualification' in q):
+            if resume_degrees and not any(d in a for d in resume_degrees):
+                result['contradictions'].append(
+                    f"Education answer doesn't reference resume degrees: {', '.join(d[:20] for d in resume_degrees)}"
+                )
 
     return result
 

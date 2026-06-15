@@ -225,3 +225,28 @@ class AnalyzePatternsSerializer(serializers.Serializer):
 
 class WeeklyReportSerializer(serializers.Serializer):
     pass
+
+
+class RecruiterSimulationSerializer(serializers.Serializer):
+    resume_data = serializers.JSONField()
+    cover_letter_text = serializers.CharField()
+    screening_answers = serializers.ListField(child=serializers.JSONField(), required=False, default=list)
+    profile_data = serializers.JSONField(required=False, default=dict)
+    job_data = serializers.JSONField()
+
+
+class ApplicationQualitySerializer(serializers.Serializer):
+    resume_data = serializers.JSONField()
+    cover_letter_text = serializers.CharField()
+    screening_answers = serializers.ListField(child=serializers.JSONField(), required=False, default=list)
+    profile_data = serializers.JSONField(required=False, default=dict)
+    job_data = serializers.JSONField()
+
+
+class ATSOptimizationSerializer(serializers.Serializer):
+    resume_data = serializers.JSONField()
+    job_platform = serializers.CharField(required=False, allow_blank=True)
+
+
+class InterviewMaximizationSerializer(serializers.Serializer):
+    pass

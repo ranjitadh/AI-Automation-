@@ -174,13 +174,72 @@ def decide_application(job_match: dict, calibration: dict,
     underqual_risk = job_match.get('underqualification_risk', 'none')
     decision_str = job_match.get('decision', 'reject')
 
-    if fit_score < threshold:
+    adjusted_threshold = threshold
+    throttle_info = {}
+    comp_info = {}
+    if user and organization and job:
+        try:
+            from .salary_throttle_engine import compute_throttle, compute_bid_score
+            from .competitive_analysis_engine import score_competitiveness, adjust_threshold_for_competition
+            goals = CareerGoal.objects.filter(
+                user=user, organization=organization, is_active=True
+            ).first()
+            if goals:
+                t_min = goals.target_salary_min
+                t_max = goals.target_salary_max
+                throttle_info = compute_throttle(
+                    target_salary_min=t_min,
+                    target_salary_max=t_max,
+                    job_salary_min=job.salary_min,
+                    job_salary_max=job.salary_max,
+                    job_salary_period=job.salary_period,
+                )
+                tf = throttle_info.get('throttle_factor', 1.0)
+                if tf < 0.3:
+                    adjusted_threshold = 95
+                elif tf < 0.6:
+                    adjusted_threshold = 85
+                elif tf < 0.8:
+                    adjusted_threshold = 75
+                bid = compute_bid_score(
+                    fit_score=fit_score,
+                    throttle_factor=tf,
+                    skill_match_score=job_match.get('skill_match_score', 50),
+                    industry_match_score=job_match.get('industry_match_score', 50),
+                )
+                throttle_info['bid_score'] = bid
+                throttle_info['adjusted_threshold'] = adjusted_threshold
+        except Exception as e:
+            logger.warning(f"Salary throttle failed: {e}")
+
+        try:
+            comp_info = score_competitiveness(
+                posted_at=job.posted_at,
+                applicant_count=job.application_count,
+                company_size=job.company.size if job.company else None,
+                location=job.location,
+                remote=job.remote,
+            )
+            adjusted_threshold = adjust_threshold_for_competition(
+                adjusted_threshold, comp_info['competitiveness_score']
+            )
+            throttle_info['competitiveness'] = comp_info
+        except Exception as e:
+            logger.warning(f"Competitive analysis failed: {e}")
+
+    if fit_score < adjusted_threshold:
         decision_str = 'reject'
     elif overqual_risk in ('high', 'medium') or underqual_risk in ('high', 'medium'):
         if decision_str != 'reject':
             decision_str = 'review'
 
     if user and organization and job:
+        reasoning = job_match.get('reasoning', '')
+        if throttle_info.get('reason'):
+            reasoning += f" | Salary: {throttle_info['reason']} (bid={throttle_info.get('bid_score', '?')})"
+        if comp_info.get('reasons'):
+            reasoning += f" | Competition: {comp_info.get('reasons', '')}"
+
         decision = ApplicationDecision.objects.update_or_create(
             user=user,
             organization=organization,
@@ -197,9 +256,9 @@ def decide_application(job_match: dict, calibration: dict,
                 'overqualification_risk': overqual_risk,
                 'underqualification_risk': underqual_risk,
                 'auto_reject_reason': job_match.get('auto_reject_reason', ''),
-                'reasoning': job_match.get('reasoning', ''),
+                'reasoning': reasoning,
                 'confidence': job_match.get('confidence', 0.5),
-                'threshold_used': threshold,
+                'threshold_used': adjusted_threshold,
                 'auto_apply': auto_apply and decision_str == 'apply',
             },
         )[0]

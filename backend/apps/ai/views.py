@@ -29,6 +29,8 @@ from .serializers import (
     HumanizedCoverLetterSerializer, ScreeningAnswersSerializer,
     ValidateApplicationSerializer, CalibrateExperienceSerializer,
     RecordOutcomeSerializer, AnalyzePatternsSerializer, WeeklyReportSerializer,
+    RecruiterSimulationSerializer, ApplicationQualitySerializer,
+    ATSOptimizationSerializer, InterviewMaximizationSerializer,
 )
 from .gateway import generate as gateway_generate
 from .agent import CareerAgent
@@ -47,6 +49,12 @@ from .validation_engine import validate_application, validate_before_submission
 from .consistency_engine import verify_application_consistency
 from .learning_engine import (
     record_outcome, analyze_patterns, get_weekly_report,
+)
+from .recruiter_simulation_engine import simulate_recruiter_perspectives
+from .application_quality_engine import evaluate_application_quality
+from .ats_optimization_engine import evaluate_ats_compatibility, get_ats_optimization_suggestions
+from .interview_maximization_engine import (
+    compute_interview_maximization, get_optimal_resume_style, get_optimal_salary_range,
 )
 
 logger = logging.getLogger(__name__)
@@ -500,6 +508,80 @@ class AIAnalyticsView(generics.GenericAPIView):
             'by_provider': list(by_provider),
             'budget': budget_status,
             'period_days': days,
+        })
+
+
+class RecruiterSimulationView(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated, IsOrgMember]
+    serializer_class = RecruiterSimulationSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = simulate_recruiter_perspectives(
+            resume_data=serializer.validated_data['resume_data'],
+            cover_letter_text=serializer.validated_data['cover_letter_text'],
+            screening_answers=serializer.validated_data.get('screening_answers', []),
+            profile_data=serializer.validated_data.get('profile_data', {}),
+            job_data=serializer.validated_data['job_data'],
+        )
+        return Response(result)
+
+
+class ApplicationQualityView(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated, IsOrgMember]
+    serializer_class = ApplicationQualitySerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = evaluate_application_quality(
+            resume_data=serializer.validated_data['resume_data'],
+            cover_letter_text=serializer.validated_data['cover_letter_text'],
+            screening_answers=serializer.validated_data.get('screening_answers', []),
+            profile_data=serializer.validated_data.get('profile_data', {}),
+            job_data=serializer.validated_data['job_data'],
+        )
+        return Response(result)
+
+
+class ATSOptimizationView(generics.CreateAPIView):
+    permission_classes = [IsAuthenticated, IsOrgMember]
+    serializer_class = ATSOptimizationSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        resume_data = serializer.validated_data['resume_data']
+        job_platform = serializer.validated_data.get('job_platform', '')
+
+        if job_platform:
+            suggestions = get_ats_optimization_suggestions(resume_data, job_platform)
+            return Response({
+                "platform_specific": True,
+                "platform": job_platform,
+                "suggestions": suggestions,
+            })
+
+        result = evaluate_ats_compatibility(resume_data)
+        return Response(result)
+
+
+class InterviewMaximizationView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsOrgMember]
+    serializer_class = InterviewMaximizationSerializer
+
+    def get(self, request, *args, **kwargs):
+        maximization = compute_interview_maximization(request.user, request.org)
+        resume_style = get_optimal_resume_style(request.user, request.org)
+        salary_range = get_optimal_salary_range(request.user, request.org)
+
+        return Response({
+            **maximization,
+            "optimal_resume_style": resume_style,
+            "optimal_salary_range": salary_range,
         })
 
 

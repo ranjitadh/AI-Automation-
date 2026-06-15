@@ -270,6 +270,79 @@ EXPERIENCE_CALIBRATION_SCHEMA = {
     "required": ["calibration_type", "reason", "seniority_gap"],
 }
 
+RECRUITER_SIMULATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "interview_probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "rejection_probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "ats_probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "hiring_manager_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "recruiter_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "technical_interviewer_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "confidence_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "perspectives": {
+            "type": "object",
+            "properties": {
+                "hr_recruiter": {"type": "object"},
+                "hiring_manager": {"type": "object"},
+                "ats": {"type": "object"},
+                "technical_interviewer": {"type": "object"},
+            },
+        },
+    },
+    "required": ["interview_probability", "rejection_probability"],
+}
+
+APPLICATION_QUALITY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "application_quality_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "application_authenticity_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "humanity_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "ai_detection_risk": {"type": "object"},
+        "overqualification_risk": {"type": "object"},
+        "underqualification_risk": {"type": "object"},
+        "submission_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "should_submit": {"type": "boolean"},
+        "can_auto_submit": {"type": "boolean"},
+    },
+    "required": ["application_quality_score", "submission_confidence", "should_submit"],
+}
+
+INTERVIEW_MAXIMIZATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "has_data": {"type": "boolean"},
+        "interview_rate": {"type": "number"},
+        "interviews": {"type": "integer"},
+        "rejections": {"type": "integer"},
+        "total_applications": {"type": "integer"},
+        "best_performing_industries": {"type": "array"},
+        "best_performing_titles": {"type": "array"},
+        "best_performing_skills": {"type": "array"},
+        "best_performing_resume_versions": {"type": "array"},
+        "optimal_salary_range": {"type": "object"},
+        "optimal_company_size": {"type": "object"},
+        "best_locations": {"type": "array"},
+        "top_success_patterns": {"type": "array"},
+    },
+    "required": ["has_data", "interview_rate"],
+}
+
+ATS_OPTIMIZATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "overall_ats_compatibility": {"type": "number"},
+        "platform_scores": {"type": "array"},
+        "weakest_platform": {"type": "string"},
+        "weakest_score": {"type": "integer"},
+        "strongest_platform": {"type": "string"},
+        "strongest_score": {"type": "integer"},
+        "priority_improvements": {"type": "array"},
+    },
+    "required": ["overall_ats_compatibility", "platform_scores"],
+}
+
 CONSISTENCY_CHECK_SCHEMA = {
     "type": "object",
     "properties": {
@@ -309,4 +382,8 @@ TASK_SCHEMAS = {
     'learning_outcome': LEARNING_OUTCOME_SCHEMA,
     'experience_calibration': EXPERIENCE_CALIBRATION_SCHEMA,
     'consistency_check': CONSISTENCY_CHECK_SCHEMA,
+    'recruiter_simulation': RECRUITER_SIMULATION_SCHEMA,
+    'application_quality': APPLICATION_QUALITY_SCHEMA,
+    'interview_maximization': INTERVIEW_MAXIMIZATION_SCHEMA,
+    'ats_optimization': ATS_OPTIMIZATION_SCHEMA,
 }

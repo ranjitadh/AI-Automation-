@@ -3,7 +3,9 @@ import json
 import uuid
 import re
 import logging
+import random
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from typing import Optional
 from django.core.files.storage import default_storage
@@ -53,6 +55,7 @@ class BasePlatformHandler(ABC):
             '#captcha',
             '.captcha',
             '[data-sitekey]',
+            'div[style*="visibility: hidden"][aria-hidden="true"] iframe',
         ]
         for selector in captcha_indicators:
             try:
@@ -71,13 +74,18 @@ class BasePlatformHandler(ABC):
             'text=Application received',
             'text=Successfully applied',
             'text=Submitted successfully',
+            'text=Your application was sent',
+            'text=Your submission was successful',
             '.application-success',
             '[data-testid="success-message"]',
             '[role="alert"][aria-live="polite"]',
             '.css-1i0v9q0',
             '[class*="success"]',
             '[class*="confirmation"]',
+            '[class*="submission-complete"]',
+            '[data-automation-id*="success"]',
         ]
+        self.page.wait_for_timeout(2000)
         for selector in success_selectors:
             try:
                 if self.page.locator(selector).count() > 0:
@@ -86,6 +94,13 @@ class BasePlatformHandler(ABC):
             except Exception:
                 continue
         return False
+
+    def wait_for_navigation(self, timeout=10000):
+        try:
+            with self.page.expect_navigation(timeout=timeout):
+                pass
+        except Exception:
+            pass
 
     def take_screenshot(self, name="application"):
         try:
@@ -112,14 +127,42 @@ class BasePlatformHandler(ABC):
                 return False
             for fi in file_inputs:
                 try:
-                    fi.set_input_files(local_path)
-                    self.log(f"Uploaded resume: {local_path}")
+                    if fi.is_visible():
+                        fi.set_input_files(local_path)
+                        self.log(f"Uploaded resume: {local_path}")
+                    else:
+                        fi.set_input_files(local_path)
+                        self.log(f"Uploaded resume (hidden field): {local_path}")
                 except Exception as e:
                     self.log(f"File upload failed: {e}", "warning")
             return True
         except Exception as e:
             self.log(f"Resume upload error: {e}", "error")
             return False
+
+    def wait_and_fill(self, selector: str, value: str, timeout=5000):
+        try:
+            locator = self.page.locator(selector)
+            if locator.count() > 0:
+                locator.first.wait_for(state='visible', timeout=timeout)
+                locator.first.fill(value)
+                time.sleep(random.uniform(0.1, 0.3))
+                return True
+        except Exception:
+            pass
+        return False
+
+    def wait_and_click(self, selector: str, timeout=5000):
+        try:
+            locator = self.page.locator(selector)
+            if locator.count() > 0:
+                locator.first.wait_for(state='visible', timeout=timeout)
+                locator.first.click()
+                time.sleep(random.uniform(0.5, 1.5))
+                return True
+        except Exception:
+            pass
+        return False
 
     def _resolve_resume_path(self, resume_path: Optional[str]) -> Optional[str]:
         if not resume_path:
@@ -185,6 +228,8 @@ class BasePlatformHandler(ABC):
             'span[class*="label"]:has(+ input)',
             'div[class*="question"] label',
             'div[class*="field"] label',
+            '[role="heading"]',
+            'strong',
         ]
         for selector in selectors:
             try:
@@ -321,13 +366,14 @@ class BasePlatformHandler(ABC):
                 return ans.get('answer', '')
 
         if 'why' in question_lower and ('company' in question_lower or 'work' in question_lower):
-            return f"I am excited about this opportunity because my background in {self.info.get('skills', 'this field')} aligns well with the role requirements."
+            skills = self.info.get('skills', 'this field')
+            return f"My background in {skills} aligns well with this role."
         if 'authoriz' in question_lower or 'visa' in question_lower or 'sponsor' in question_lower:
             return self.info.get('work_authorization', 'Yes, I am authorized to work')
         if 'salary' in question_lower:
-            return self.info.get('salary_expectation', 'Open to discussion based on total compensation')
+            return self.info.get('salary_expectation', 'Based on the role and responsibilities')
         if 'start' in question_lower or 'available' in question_lower or 'notice' in question_lower:
-            return self.info.get('availability', 'Immediately')
+            return self.info.get('availability', 'Two weeks')
         if 'degree' in question_lower or 'education' in question_lower or 'qualification' in question_lower:
             return self.info.get('highest_education', "Bachelor's degree")
         if 'gender' in question_lower or 'race' in question_lower or 'ethnicity' in question_lower or 'veteran' in question_lower or 'disability' in question_lower:
@@ -335,4 +381,4 @@ class BasePlatformHandler(ABC):
         if 'referral' in question_lower or 'source' in question_lower or 'hear' in question_lower:
             return "LinkedIn"
 
-        return "I have relevant experience that aligns well with this role."
+        return "I have relevant experience for this role."

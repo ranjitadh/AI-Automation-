@@ -50,7 +50,7 @@ class AIDetectionTests(TestCase):
 
     def test_detection_method(self):
         result = detect_ai_generated("Some text here.")
-        self.assertEqual(result['detection_method'], 'programmatic_pattern_analysis')
+        self.assertEqual(result['detection_method'], 'programmatic_pattern_analysis_v2')
 
     def test_suggestions_generated(self):
         result = detect_ai_generated(

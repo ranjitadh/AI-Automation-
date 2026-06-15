@@ -29,6 +29,10 @@ urlpatterns = [
     path('outcomes/record/', views.RecordOutcomeView.as_view(), name='ai-record-outcome'),
     path('outcomes/weekly-report/', views.WeeklyReportView.as_view(), name='ai-weekly-report'),
     path('check-consistency/', views.ConsistencyCheckView.as_view(), name='ai-check-consistency'),
+    path('simulate/recruiter/', views.RecruiterSimulationView.as_view(), name='ai-recruiter-simulation'),
+    path('evaluate/quality/', views.ApplicationQualityView.as_view(), name='ai-application-quality'),
+    path('evaluate/ats/', views.ATSOptimizationView.as_view(), name='ai-ats-optimization'),
+    path('maximize/interview/', views.InterviewMaximizationView.as_view(), name='ai-interview-maximization'),
     path('analytics/', views.AIAnalyticsView.as_view(), name='ai-analytics'),
     path('prompts/rollback/', views.PromptTemplateViewSet.as_view({'post': 'rollback'}), name='ai-prompt-rollback'),
 ]
