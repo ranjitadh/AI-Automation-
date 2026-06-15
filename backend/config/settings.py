@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'apps.audit',
     'apps.admin_dashboard',
     'apps.pipeline',
+    'apps.ai',
 ]
 
 MIDDLEWARE = [
@@ -283,6 +284,13 @@ OPENAI_MAX_TOKENS = config('OPENAI_MAX_TOKENS', default=4096, cast=int)
 OPENAI_TEMPERATURE = config('OPENAI_TEMPERATURE', default=0.3, cast=float)
 OPENAI_DAILY_BUDGET_CENTS = config('OPENAI_DAILY_BUDGET_CENTS', default=5000, cast=int)
 OPENAI_RATE_LIMIT_RPM = config('OPENAI_RATE_LIMIT_RPM', default=500, cast=int)
+
+# ──────────────────────────────────────────────
+# GEMINI
+# ──────────────────────────────────────────────
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+GEMINI_PRO_MODEL = config('GEMINI_PRO_MODEL', default='gemini-2.5-pro')
+GEMINI_FLASH_MODEL = config('GEMINI_FLASH_MODEL', default='gemini-2.5-flash')
 
 AGENCY_NAME = config('AGENCY_NAME', default='Your Agency')
 AGENCY_WEBSITE = config('AGENCY_WEBSITE', default='https://youragency.com')

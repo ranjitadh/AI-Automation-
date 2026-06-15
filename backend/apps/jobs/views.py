@@ -1,10 +1,9 @@
-from rest_framework import viewsets, serializers, status
+from rest_framework import viewsets, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Job, Company, JobSource
 from apps.common.mixins import OrganizationFilterMixin
-from apps.common.permissions import IsOrgMember
 
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:

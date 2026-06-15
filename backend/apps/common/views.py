@@ -1,14 +1,12 @@
 import logging
-from django.db import connections
 from django.conf import settings
 from django.http import JsonResponse
-from rest_framework import viewsets, mixins, generics, status
-from rest_framework.decorators import action
+from rest_framework import viewsets, mixins, generics
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from .models import FileUpload, OrganizationSettings, Skill
 from .serializers import FileUploadSerializer, OrganizationSettingsSerializer, SkillSerializer
-from .permissions import IsOrgMember, IsOrgAdmin
+from .permissions import IsOrgMember
 from .mixins import OrganizationFilterMixin
 from .pagination import StandardPagination
 
