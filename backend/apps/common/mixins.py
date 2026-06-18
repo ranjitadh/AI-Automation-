@@ -4,9 +4,7 @@ class OrganizationFilterMixin:
     def get_queryset(self):
         qs = super().get_queryset()
         org = getattr(self.request, 'org', None)
-        if org is None:
-            return qs.filter(pk=None)
-        if hasattr(qs.model, 'organization'):
+        if org is not None and hasattr(qs.model, 'organization'):
             return qs.filter(organization=org)
         return qs
 

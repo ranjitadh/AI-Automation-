@@ -48,6 +48,21 @@ class JobViewSet(OrganizationFilterMixin, viewsets.ModelViewSet):
             return Response(JobAnalysisSerializer(analyses.first()).data)
         return Response({'error': 'No analysis found'}, status=404)
 
+class JobSourceViewSet(viewsets.ModelViewSet):
+    serializer_class = JobSourceSerializer
+    permission_classes = [IsAuthenticated]
+    queryset = JobSource.objects.all()
+    search_fields = ['name', 'connector_type']
+    filterset_fields = ['connector_type', 'is_enabled']
+
+    @action(detail=True, methods=['post'])
+    def sync(self, request, pk=None):
+        source = self.get_object()
+        from apps.jobs.discovery import discover_jobs
+        jobs = discover_jobs(max_jobs=50)
+        return Response({'status': 'sync complete', 'jobs_found': len(jobs)})
+
+
 class CompanyViewSet(OrganizationFilterMixin, viewsets.ModelViewSet):
     serializer_class = CompanySerializer
     permission_classes = [IsAuthenticated]
