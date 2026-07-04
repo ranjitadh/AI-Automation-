@@ -2,6 +2,7 @@ import random
 import time
 from typing import Optional
 
+
 class AntiDetectionManager:
     def __init__(self):
         self.user_agents = [
@@ -10,12 +11,14 @@ class AntiDetectionManager:
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         ]
         self.viewports = [
             {"width": 1920, "height": 1080},
             {"width": 1440, "height": 900},
             {"width": 1366, "height": 768},
             {"width": 1536, "height": 864},
+            {"width": 1728, "height": 1117},
         ]
         self.locales = ['en-US', 'en-GB', 'en-CA', 'en-AU']
 
@@ -55,9 +58,13 @@ class AntiDetectionManager:
             pass
 
     @staticmethod
-    def spoof_webgl_fingerprint(page):
+    def random_typing_delay():
+        return random.uniform(0.05, 0.15)
+
+    @staticmethod
+    def spoof_webgl_fingerprint(context):
         try:
-            page.add_init_script("""
+            context.add_init_script("""
                 const getParameter = WebGLRenderingContext.prototype.getParameter;
                 WebGLRenderingContext.prototype.getParameter = function(parameter) {
                     if (parameter === 37445) return 'Intel Inc.';
@@ -89,16 +96,22 @@ class AntiDetectionManager:
                     }
                     return origToDataURL.call(canvas, type);
                 };
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
             """)
         except Exception:
             pass
 
     def get_browser_context_args(self):
+        timezone_options = [
+            'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+        ]
         return {
             'user_agent': self.get_random_user_agent(),
             'viewport': self.get_random_viewport(),
             'locale': self.get_random_locale(),
-            'timezone_id': 'America/New_York',
+            'timezone_id': random.choice(timezone_options),
             'geolocation': {'latitude': 40.7128, 'longitude': -74.0060},
             'permissions': ['geolocation'],
         }

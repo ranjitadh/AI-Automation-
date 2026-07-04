@@ -1,5 +1,4 @@
 from django.conf import settings
-from django.utils import timezone
 
 
 class OrganizationMiddleware:
@@ -16,6 +15,8 @@ class OrganizationMiddleware:
                 request.org = Organization.objects.get(id=org_id)
             except (Organization.DoesNotExist, ValueError, TypeError):
                 pass
+        if request.org is None and request.user.is_authenticated and request.user.current_organization:
+            request.org = request.user.current_organization
         return self.get_response(request)
 
 

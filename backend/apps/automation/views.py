@@ -1,10 +1,10 @@
-from rest_framework import viewsets, serializers, status
+from rest_framework import viewsets, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import BrowserSession, AutomationRun, AutomationLog
 from apps.common.mixins import OrganizationFilterMixin
-from apps.common.permissions import IsOrgMember, IsOrgAdmin
+from apps.common.permissions import IsOrgMember
 
 class BrowserSessionSerializer(serializers.ModelSerializer):
     class Meta:

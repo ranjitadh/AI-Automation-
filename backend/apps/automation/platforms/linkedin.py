@@ -1,5 +1,6 @@
 from .base import BasePlatformHandler
 
+
 class LinkedInHandler(BasePlatformHandler):
     def detect(self) -> bool:
         url = self.page.url.lower()
@@ -7,6 +8,9 @@ class LinkedInHandler(BasePlatformHandler):
 
     def apply(self) -> tuple:
         self.log("LinkedIn Easy Apply flow starting")
+
+        if not self.handle_captcha():
+            return False, self.logs, None
 
         easy_apply_btn = self.page.locator(
             'button:has-text("Easy Apply"), '
@@ -20,14 +24,16 @@ class LinkedInHandler(BasePlatformHandler):
 
         easy_apply_btn.click()
         self.page.wait_for_timeout(3000)
+        screenshot_before = self.take_screenshot("linkedin_apply_start")
 
         for step in range(15):
             self.page.wait_for_timeout(1500)
 
             self._fill_textareas()
             self._fill_inputs()
-            self._handle_uploads()
+            self.upload_resume(self.info.get('resume_path'))
             self._handle_multichoice()
+            self.answer_screening_questions()
 
             next_btn = self.page.locator(
                 'button:has-text("Next"), '
@@ -52,17 +58,21 @@ class LinkedInHandler(BasePlatformHandler):
         if submit_btn.count() and submit_btn.is_visible():
             submit_btn.click()
             self.page.wait_for_timeout(3000)
+            self.take_screenshot("linkedin_submitted")
             self.log("Application submitted on LinkedIn")
-            return True, self.logs, None
+            return True, self.logs, self.screenshots[-1] if self.screenshots else None
 
         self.log("Could not find submit button", "error")
-        return False, self.logs, None
+        return False, self.logs, screenshot_before
 
     def _fill_textareas(self):
         for ta in self.page.locator('textarea:visible').all():
             try:
                 if ta.is_visible() and len(ta.input_value() or '') < 10:
-                    ta.fill(self.cover_letter.content if hasattr(self.cover_letter, 'content') else self.cover_letter or '')
+                    cover = self.cover_letter
+                    if hasattr(cover, 'content'):
+                        cover = cover.content
+                    ta.fill(cover or '')
             except Exception:
                 continue
 
@@ -71,19 +81,16 @@ class LinkedInHandler(BasePlatformHandler):
             try:
                 name = (inp.get_attribute('name') or '').lower()
                 placeholder = (inp.get_attribute('placeholder') or '').lower()
-                if 'email' in name or 'email' in placeholder:
+                aria_label = (inp.get_attribute('aria-label') or '').lower()
+                if inp.input_value():
+                    continue
+                combined = f"{name} {placeholder} {aria_label}"
+                if 'email' in combined or inp.get_attribute('type') == 'email':
                     inp.fill(self.info.get('email', ''))
-                elif 'phone' in name or 'phone' in placeholder or 'tel' in name:
+                elif 'phone' in combined or 'tel' in combined:
                     inp.fill(self.info.get('phone', ''))
-                elif 'name' in name or 'name' in placeholder:
+                elif 'name' in combined:
                     inp.fill(self.info.get('name', ''))
-            except Exception:
-                continue
-
-    def _handle_uploads(self):
-        for file_input in self.page.locator('input[type="file"]:visible').all():
-            try:
-                self.log("File upload field detected (skipping automated upload)", "info")
             except Exception:
                 continue
 

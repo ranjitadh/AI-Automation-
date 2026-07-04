@@ -5,11 +5,12 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Briefcase, Send, FileText, Calendar,
-  DollarSign, Users, BarChart3, Settings, Building2,
+  DollarSign, Users, BarChart3, Settings, Building2, Bot,
 } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/career-agent", label: "Career Agent", icon: Bot },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/campaigns", label: "Campaigns", icon: Send },
   { href: "/applications", label: "Applications", icon: FileText },
@@ -17,7 +18,7 @@ const navItems = [
   { href: "/offers", label: "Offers", icon: DollarSign },
   { href: "/recruiters", label: "Recruiters", icon: Users },
   { href: "/resumes", label: "Resumes", icon: FileText },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/ai-analytics", label: "AI Analytics", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -55,7 +56,7 @@ export function Sidebar() {
       </nav>
       <div className="p-4 border-t">
         <Link
-          href="/settings/billing"
+          href="/settings"
           className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
         >
           <DollarSign className="h-4 w-4" />
