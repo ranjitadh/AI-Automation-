@@ -25,6 +25,7 @@ api_patterns = [
     path('admin/', include('apps.admin_dashboard.urls')),
     path('webhooks/', include('apps.billing.urls_webhooks')),
     path('pipeline/', include('apps.pipeline.urls')),
+    path('ai/', include('apps.ai.urls')),
 ]
 
 urlpatterns = [

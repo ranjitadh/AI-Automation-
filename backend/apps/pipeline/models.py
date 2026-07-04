@@ -20,6 +20,15 @@ class PipelineRun(models.Model):
 
     log = models.TextField(blank=True, null=True)
 
+    fit_score = models.IntegerField(null=True, blank=True)
+    decision = models.CharField(max_length=20, blank=True)
+    bid_score = models.IntegerField(null=True, blank=True)
+    throttle_factor = models.FloatField(null=True, blank=True)
+    competitiveness_score = models.IntegerField(null=True, blank=True)
+    resume_version_id = models.CharField(max_length=100, blank=True)
+    application_id = models.CharField(max_length=100, blank=True)
+    quality_score = models.IntegerField(null=True, blank=True)
+
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 

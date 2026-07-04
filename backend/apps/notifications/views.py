@@ -1,4 +1,4 @@
-from rest_framework import viewsets, serializers, status, generics
+from rest_framework import viewsets, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -17,7 +17,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 class WebhookSerializer(serializers.ModelSerializer):
     class Meta:
         model = Webhook
-        fields = ('id', 'organization', 'name', 'url', 'events', 'secret', 'is_active', 'last_triggered_at', 'last_success_at', 'last_failure_at', 'failure_count', 'created_at', 'updated_at')
+        fields = ('id', 'organization', 'url', 'events', 'secret', 'is_active', 'last_triggered_at', 'last_success_at', 'last_failure_at', 'failure_count', 'created_at', 'updated_at')
         read_only_fields = ('organization', 'last_triggered_at', 'last_success_at', 'last_failure_at', 'failure_count')
 
 class NotificationViewSet(OrganizationFilterMixin, viewsets.ReadOnlyModelViewSet):

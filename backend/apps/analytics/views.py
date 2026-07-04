@@ -1,12 +1,11 @@
-from rest_framework import viewsets, serializers, status, generics
+from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Count, Q, Avg, Sum
-from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
+from django.db.models import Count, Q
+from django.db.models.functions import TruncWeek, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 from apps.applications.models import Application
-from apps.jobs.models import Job
 from apps.interviews.models import Interview, Offer
 from apps.common.permissions import IsOrgMember
 

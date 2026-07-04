@@ -1,11 +1,11 @@
-from rest_framework import viewsets, serializers, status
+from rest_framework import viewsets, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from .models import Application, ApplicationEvent
 from apps.common.mixins import OrganizationFilterMixin
-from apps.common.permissions import IsOrgMember, IsOrgAdmin
+from apps.common.permissions import IsOrgMember
 
 class ApplicationSerializer(serializers.ModelSerializer):
     job_title = serializers.CharField(source='job.title', read_only=True)

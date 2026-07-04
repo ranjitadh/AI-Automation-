@@ -5,7 +5,6 @@ from django.utils import timezone
 from apps.applications.models import Application, ApplicationEvent
 from apps.automation.models import AutomationRun, AutomationLog
 from apps.automation.runner import run_automation
-from apps.common.models import FileUpload
 
 logger = logging.getLogger(__name__)
 
@@ -75,22 +74,4 @@ def run_application_automation(application_id):
     app.save(update_fields=['status', 'submitted_at', 'dispatch_status', 'dispatch_log', 'confirmation_text'])
     return success
 
-@shared_task(
-    autoretry_for=(Exception,),
-    retry_kwargs={'max_retries': 3},
-    retry_backoff=True,
-    retry_backoff_max=600,
-    retry_jitter=True,
-    soft_time_limit=120,
-    time_limit=300,
-    acks_late=True,
-    queue='automation',
-)
-def retry_failed_applications():
-    failed = Application.objects.filter(
-        dispatch_status='failed',
-        dispatch_attempts__lt=3,
-    )[:20]
-    for app in failed:
-        run_application_automation.delay(str(app.id))
-    return f"Retrying {failed.count()} applications"
+

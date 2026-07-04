@@ -7,8 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from .models import User, Organization, Team, Membership
 import uuid
-from apps.common.permissions import IsOrgAdmin, IsOrgOwner
-from apps.common.mixins import OrganizationFilterMixin
+
 
 class AuthRateThrottle(UserRateThrottle):
     rate = '10/min'
